@@ -63,6 +63,13 @@ Rectangle {
     property int labelWidthChars: 8
     property int charW: Math.round(boxMonoSize * 0.62)
 
+    // sddm greeter creates one view per screen (xrandr shows 2 monitors → 2 windows)
+    // primaryScreen context is set per view by GreeterApp.cpp
+    // theme.conf: primaryScreen=false (default, show on all) / true (only primary, avoids "two terminals")
+    property bool cfgPrimaryScreen: cfgBool(config.primaryScreen, cfgBool(config.showOnPrimaryOnly, false))
+    property bool _isPrimaryRaw: typeof primaryScreen !== "undefined" ? primaryScreen : true
+    property bool isPrimary: cfgPrimaryScreen ? _isPrimaryRaw : true
+
     // ============================================================
     //  status
     // ============================================================
@@ -77,6 +84,30 @@ Rectangle {
     // ============================================================
     //  Model
     // ============================================================
+    // Hidden stash to read model roles without hard-coding integers
+    // Upstream-approved: sessionModel.data() is not Q_INVOKABLE, use Repeater delegate model.name
+    // see https://github.com/akitaonrails/NW-Omarchy/blob/master/default/sddm-theme/Main.qml
+    // and https://github.com/cutefishos/sddm-theme/blob/main/SessionMenu.qml (text: model.name)
+    // and official sddm src/greeter/theme/Main.qml uses ComboBox { model: sessionModel } + delegate model.name
+    Item {
+        id: sessionStash
+        visible: false
+        Repeater {
+            id: sessionRepeater
+            model: sessionModel
+            delegate: Item { property string sessName: (model.name || "").toString() }
+        }
+    }
+    Item {
+        id: userStash
+        visible: false
+        Repeater {
+            id: userRepeater
+            model: userModel
+            delegate: Item { property string usrName: (model.name || "").toString() }
+        }
+    }
+
     function _getModelName(m,i){
         if(!m||!m.count) return "";
         if(i<0||i>=m.count) i=0;
@@ -94,8 +125,25 @@ Rectangle {
             return "";
         }
     }
-    function userName()    { return _getModelName(userModel,    currentUserIndex) }
-    function sessionName() { return _getModelName(sessionModel, currentSessionIndex) }
+    function userName() {
+        if (userModel && userRepeater.count > 0) {
+            var it = userRepeater.itemAt(currentUserIndex);
+            if (it && it.usrName) return it.usrName;
+        }
+        return _getModelName(userModel, currentUserIndex)
+    }
+    function sessionName() {
+        if (sessionModel && sessionRepeater.count > 0) {
+            var it = sessionRepeater.itemAt(currentSessionIndex);
+            if (it && it.sessName) return it.sessName;
+        }
+        // fallback for early startup (repeater not yet populated): try session-specific roles directly
+        if (sessionModel && sessionModel.count) {
+            try { var v2 = sessionModel.data(sessionModel.index(currentSessionIndex,0), 260); if (v2 !== undefined && v2 !== null && String(v2).trim() !== "") return String(v2); } catch(e2) {}
+            try { var v3 = sessionModel.data(sessionModel.index(currentSessionIndex,0), 258); if (v3 !== undefined && v3 !== null && String(v3).trim() !== "") { var f = String(v3); return f.replace(/\.desktop$/i,""); } } catch(e3) {}
+        }
+        return _getModelName(sessionModel, currentSessionIndex)
+    }
 
     function doLogin(){ errorText=""; var u=userName(); if(!u){errorText="no user";return} sddm.login(u,passwordField.text,currentSessionIndex) }
 
@@ -177,6 +225,7 @@ Rectangle {
     // ============================================================
     Rectangle {
         id: box
+        visible: isPrimary
         width: Math.min((labelWidthChars + cfgInputLen) * charW + 60, root.width - 40)
         height: boxCol.implicitHeight + 60
         anchors.centerIn: parent
