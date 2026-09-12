@@ -20,7 +20,7 @@
 ## 安装
 依赖
 ```bash
-sudo dnf install -y sddm qt6-qtdeclarative qt6-qtquickcontrols2 sddm-themes
+sudo dnf install -y make sddm qt6-qtdeclarative qt6-qtquickcontrols2 sddm-themes
 
 sudo make install
 # 手动
