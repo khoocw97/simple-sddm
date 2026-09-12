@@ -1,0 +1,5 @@
+# 预览图生成缓存
+*.tmp
+.DS_Store
+*~
+*.backup*
