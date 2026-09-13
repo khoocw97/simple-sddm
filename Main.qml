@@ -63,12 +63,51 @@ Rectangle {
     property int labelWidthChars: 8
     property int charW: Math.round(boxMonoSize * 0.62)
 
-    // sddm greeter creates one view per screen (xrandr shows 2 monitors → 2 windows)
-    // primaryScreen context is set per view by GreeterApp.cpp
-    // theme.conf: primaryScreen=false (default, show on all) / true (only primary, avoids "two terminals")
-    property bool cfgPrimaryScreen: cfgBool(config.primaryScreen, cfgBool(config.showOnPrimaryOnly, false))
-    property bool _isPrimaryRaw: typeof primaryScreen !== "undefined" ? primaryScreen : true
-    property bool isPrimary: cfgPrimaryScreen ? _isPrimaryRaw : true
+    // theme.conf primaryScreen (case-sensitive):
+    property string cfgScreenTarget: String(config.primaryScreen || "").trim()
+    property bool _isPrimaryRaw: {
+        if (typeof primaryScreen !== "undefined") return primaryScreen
+        try {
+            if (typeof screenModel !== "undefined" && screenModel && screenModel.primary !== undefined)
+                return screenModel.primary === 0
+        } catch (e) {}
+        return true
+    }
+    property string _screenName: {
+        try {
+            if (typeof Screen !== "undefined" && Screen.name && String(Screen.name).length > 0)
+                return String(Screen.name).trim()
+        } catch (e) {}
+        try {
+            if (typeof screenModel !== "undefined" && screenModel && screenModel.count > 0) {
+                var v = screenModel.data(screenModel.index(0, 0), 257)
+                if (v !== undefined && v !== null && String(v).trim() !== "") return String(v).trim()
+            }
+        } catch (e2) {}
+        return ""
+    }
+    property bool _screenTargetExists: {
+        if (cfgScreenTarget === "") return true
+        try {
+            var arr = Qt.application.screens
+            if (arr && arr.length !== undefined) {
+                for (var i = 0; i < arr.length; i++) {
+                    try { if (String(arr[i].name).trim() === cfgScreenTarget) return true } catch (e) {}
+                }
+                return false
+            }
+        } catch (e2) {}
+        if (_screenName !== "" && _screenName === cfgScreenTarget) return true
+        if (_screenName === "") return true
+        return false
+    }
+    property bool _screenNameMatches: {
+        if (cfgScreenTarget === "") return true
+        if (_screenName === "") return true
+        return _screenName === cfgScreenTarget
+    }
+    property bool isActive: cfgScreenTarget === "" ? true
+                           : (_screenTargetExists ? _screenNameMatches : _isPrimaryRaw)
 
     // ============================================================
     //  status
@@ -169,6 +208,7 @@ Rectangle {
     // ============================================================
     Item {
         id: topBar
+        visible: isActive
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
@@ -215,7 +255,7 @@ Rectangle {
     Timer {
         id: clockTimer
         interval: cfgClockSeconds ? 1000 : 60000
-        running: cfgShowDate || cfgShowClock
+        running: (cfgShowDate || cfgShowClock) && isActive
         repeat: true
         onTriggered: { var n=new Date(); if(cfgShowDate) dateText.text=Qt.formatDateTime(n,cfgDateFormat); if(cfgShowClock) clockText.text=Qt.formatDateTime(n,clockFmt) }
     }
@@ -225,7 +265,7 @@ Rectangle {
     // ============================================================
     Rectangle {
         id: box
-        visible: isPrimary
+        visible: isActive
         width: Math.min((labelWidthChars + cfgInputLen) * charW + 60, root.width - 40)
         height: boxCol.implicitHeight + 60
         anchors.centerIn: parent
@@ -397,9 +437,11 @@ Rectangle {
                             selectionColor: "#7aa2f7"
                             font.family: cfgFontFamily
                             font.pixelSize: boxMonoSize + 1
-                            echoMode: showPassword ? TextInput.Normal : TextInput.Password
+                            // Linux-style: NoEcho shows nothing (not even length);
+                            // set asterisk=# (etc.) for per-character echo instead
+                            echoMode: showPassword ? TextInput.Normal : (cfgAsterisk !== "" ? TextInput.Password : TextInput.NoEcho)
                             passwordCharacter: cfgAsterisk
-                            focus: activeRow === 2
+                            focus: activeRow === 2 && isActive
                             activeFocusOnTab: false
                             onAccepted: root.doLogin()
                             cursorVisible: false
@@ -414,6 +456,7 @@ Rectangle {
     //  keyboard
     // ============================================================
     Keys.onPressed: (event) => {
+        if (!isActive) return
         // function key
         if (event.key === root.keyShutdown && sddm.canPowerOff) { sddm.powerOff();    event.accepted = true; return }
         if (event.key === root.keyReboot && sddm.canReboot) { sddm.reboot();      event.accepted = true; return }
@@ -458,7 +501,7 @@ Rectangle {
         function onLoginFailed() {
             errorText = textConstants.loginFailed || "login failed"
             passwordField.clear()
-            activeRow=2; passwordField.forceActiveFocus()
+            if (isActive) { activeRow=2; passwordField.forceActiveFocus() }
         }
         function onInformationMessage(msg) { errorText = msg }
     }
@@ -466,5 +509,5 @@ Rectangle {
     // ============================================================
     //  初始化
     // ============================================================
-    Component.onCompleted: { if(activeRow===2) passwordField.forceActiveFocus(); else root.forceActiveFocus() }
+    Component.onCompleted: { if (!isActive) return; if(activeRow===2) passwordField.forceActiveFocus(); else root.forceActiveFocus() }
 }
